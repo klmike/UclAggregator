@@ -1,15 +1,15 @@
 namespace UclAggregator.Metrics;
 
-/// <summary>History and latest windows for the requests that landed in one performance bucket.</summary>
-public sealed record MetricWindows<T>(IReadOnlyList<T> History, IReadOnlyList<T> Latest);
+public sealed record SpeedBuckets<T>(IReadOnlyList<T> Fast, IReadOnlyList<T> Average, IReadOnlyList<T> Slow);
 
-/// <summary>Groups named series into fast (&lt;100 ms), average (100-200 ms) and slow (&gt;200 ms) using history only.</summary>
+public sealed record MetricsResponse<T>(SpeedBuckets<T> Latest, SpeedBuckets<T> History);
+
 public static class PerformanceBuckets
 {
     public const double FastMaxMs = 100;
     public const double AverageMaxMs = 200;
 
-    public static (MetricWindows<T> Fast, MetricWindows<T> Average, MetricWindows<T> Slow) Group<T>(
+    public static MetricsResponse<T> Group<T>(
         IReadOnlyDictionary<string, T> latestByName,
         IReadOnlyDictionary<string, IReadOnlyList<T>> allByName,
         Func<T, double> responseTime,
@@ -19,50 +19,36 @@ public static class PerformanceBuckets
         List<T> averageHistory = [], averageLatest = [];
         List<T> slowHistory = [], slowLatest = [];
 
-        foreach (var (name, windows) in allByName)
+        foreach (var name in allByName.Keys.Union(latestByName.Keys))
         {
+            IReadOnlyList<T> windows = allByName.TryGetValue(name, out var stored) ? stored : [];
             latestByName.TryGetValue(name, out var latest);
-            List<T> history = [];
-            foreach (var window in windows)
+
+            // Current window picks the bucket. With no live calls, use the weighted history average.
+            double ms;
+            if (latest is not null && calls(latest) > 0)
             {
-                if (latest is not null && ReferenceEquals(window, latest))
-                {
-                    continue;
-                }
-                history.Add(window);
+                ms = responseTime(latest);
+            }
+            else
+            {
+                var weight = windows.Sum(calls);
+                ms = weight == 0 ? 0 : windows.Sum(w => responseTime(w) * calls(w)) / weight;
             }
 
-            var weight = history.Sum(calls);
-            if (weight == 0)
-            {
-                continue;
-            }
+            var (historyBucket, latestBucket) = ms < FastMaxMs
+                ? (fastHistory, fastLatest)
+                : ms <= AverageMaxMs
+                    ? (averageHistory, averageLatest)
+                    : (slowHistory, slowLatest);
 
-            var ms = history.Sum(w => responseTime(w) * calls(w)) / weight;
-            var (bucketHistory, bucketLatest) = Bucket(ms);
-            bucketHistory.AddRange(history);
+            historyBucket.AddRange(windows);
             if (latest is not null)
-            {
-                bucketLatest.Add(latest);
-            }
+                latestBucket.Add(latest);
         }
 
-        return (
-            new MetricWindows<T>(fastHistory, fastLatest),
-            new MetricWindows<T>(averageHistory, averageLatest),
-            new MetricWindows<T>(slowHistory, slowLatest));
-
-        (List<T> History, List<T> Latest) Bucket(double ms)
-        {
-            if (ms < FastMaxMs)
-            {
-                return (fastHistory, fastLatest);
-            }
-            if (ms <= AverageMaxMs)
-            {
-                return (averageHistory, averageLatest);
-            }
-            return (slowHistory, slowLatest);
-        }
+        return new MetricsResponse<T>(
+            new SpeedBuckets<T>(fastLatest, averageLatest, slowLatest),
+            new SpeedBuckets<T>(fastHistory, averageHistory, slowHistory));
     }
 }

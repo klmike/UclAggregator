@@ -1,4 +1,4 @@
-namespace UclAggregator.Options;
+namespace UclAggregator.Auth;
 
 public sealed class DevUserOptions
 {

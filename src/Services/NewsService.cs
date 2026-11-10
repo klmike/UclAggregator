@@ -6,37 +6,42 @@ using UclAggregator.Options;
 
 namespace UclAggregator.Services;
 
-/// <summary>Aggregates all registered <see cref="INewsSource"/>s. Score = provider relevance weighted by recency.</summary>
 public sealed class NewsService(
     IEnumerable<INewsSource> sources,
     IOptions<AggregatorOptions> options,
     ILogger<NewsService> logger)
 {
+    // a failing provider never fails the request, it just ends up as a warning on the response
     public async Task<IReadOnlyList<NewsArticle>> SearchAsync(
         string terms, DateOnly? from, DateOnly? to, string? team, ApiResponse response, CancellationToken ct)
     {
         var query = new NewsQuery(terms, from, to, team);
         var applicable = sources.Where(s => s.AppliesTo(query)).ToList();
-        var found = await Run(applicable.Where(s => !s.Fallback).ToList());
+        // fallback sources start in parallel too, so falling back only uses data that is already on its way
+        var primary = Start(applicable.Where(s => !s.Fallback));
+        var fallback = Start(applicable.Where(s => s.Fallback));
+        var found = await Collect(primary);
+        // only use the fallback sources if the primaries came back thin
         if (found.Count <= options.Value.NewsFallbackMaxArticles)
-            found.AddRange(await Run(applicable.Where(s => s.Fallback).ToList()));
+            found.AddRange(await Collect(fallback));
+        else
+            // already running, so just observe the exception to keep it from going unobserved
+            _ = Task.WhenAll(fallback.Select(c => c.Task)).ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         return found;
 
-        async Task<List<NewsArticle>> Run(List<INewsSource> batch)
-        {
-            var calls = batch.Select(s => (s.Name, Task: SearchSourceAsync(s, query, ct))).ToList();
-            try
-            {
-                await Task.WhenAll(calls.Select(c => c.Task));
-            }
-            catch
-            {
-                // Individual failures are inspected below; one provider failing must not drop the others.
-            }
+        List<(string Name, Task<IReadOnlyList<NewsArticle>> Task)> Start(IEnumerable<INewsSource> batch) =>
+            batch.Select(s => (s.Name, Task: SearchSourceAsync(s, query, ct))).ToList();
 
-            foreach (var failed in calls.Where(c => c.Task.IsFaulted))
+        async Task<List<NewsArticle>> Collect(List<(string Name, Task<IReadOnlyList<NewsArticle>> Task)> calls)
+        {
+            // A caller abort propagates. A provider fault or HttpClient timeout is a warning.
+            try { await Task.WhenAll(calls.Select(c => c.Task)); }
+            catch (Exception) when (!ct.IsCancellationRequested) { }
+
+            foreach (var failed in calls.Where(c => !c.Task.IsCompletedSuccessfully))
             {
-                var error = failed.Task.Exception!.GetBaseException();
+                var error = failed.Task.Exception?.GetBaseException()
+                    ?? new TimeoutException($"News provider '{failed.Name}' timed out.");
                 var apiError = ApiError.From(error, $"News provider '{failed.Name}'");
                 logger.LogWarning(error, "News provider {Provider} failed with {Code}", failed.Name, apiError.Code);
                 response.AddWarning(apiError);
@@ -55,6 +60,7 @@ public sealed class NewsService(
     public static IReadOnlyList<NewsArticle> Combine(IReadOnlyList<NewsArticle> articles, int limit) =>
         Combine([articles], limit);
 
+    // same title from several sources counts once (best score wins), then best score first, newest as tie-break
     public static IReadOnlyList<NewsArticle> Combine(IEnumerable<IReadOnlyList<NewsArticle>> lists, int limit) =>
         lists.SelectMany(l => l)
             .GroupBy(a => Normalize(a.Title))
@@ -69,7 +75,7 @@ public sealed class NewsService(
         var list = await source.SearchAsync(query, ct);
         return list.Select((a, idx) =>
         {
-            // Relevance is the provider's own ordering, scaled to (0, 1].
+            // earlier results rank higher, and it never quite reaches 0
             var relevance = 1.0 - (double)idx / (list.Count + 1);
             return new NewsArticle
             {
@@ -85,7 +91,7 @@ public sealed class NewsService(
         }).ToList();
     }
 
-    // Exponential decay: an article loses half its weight every NewsHalfLifeDays; undated articles count as half.
+    // weight halves every NewsHalfLifeDays, articles without a date get a flat 0.5
     private double RecencyWeight(DateTimeOffset? published) =>
         published is null ? 0.5 : Math.Pow(0.5, Math.Max(0, (DateTimeOffset.UtcNow - published.Value).TotalDays) / options.Value.NewsHalfLifeDays);
 

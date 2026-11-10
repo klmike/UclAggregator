@@ -1,9 +1,7 @@
 using System.Diagnostics;
-using UclAggregator.Metrics;
 
 namespace UclAggregator.Metrics.Clients;
 
-/// <summary>Per-request state shared by the metrics handlers through <see cref="HttpRequestMessage.Options"/>.</summary>
 public sealed class RequestMetrics
 {
     public static readonly HttpRequestOptionsKey<RequestMetrics> Key = new("UclAggregator.RequestMetrics");
@@ -11,7 +9,6 @@ public sealed class RequestMetrics
     public bool CacheUsed { get; set; }
 }
 
-/// <summary>Outermost handler: records one <see cref="ClientCallSample"/> per call without changing its outcome.</summary>
 public sealed class ClientMetricsHandler(string clientName, SampleBuffer<ClientCallSample> store) : DelegatingHandler
 {
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -37,7 +34,7 @@ public sealed class ClientMetricsHandler(string clientName, SampleBuffer<ClientC
         }
         finally
         {
-            if (!ct.IsCancellationRequested) // a call the caller abandoned says nothing about the API
+            if (!ct.IsCancellationRequested)
             {
                 var apiCall = !metrics.CacheUsed;
                 store.Record(new ClientCallSample(

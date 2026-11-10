@@ -1,4 +1,4 @@
-namespace UclAggregator.Options;
+namespace UclAggregator.Clients.Espn;
 
 public sealed class EspnOptions
 {

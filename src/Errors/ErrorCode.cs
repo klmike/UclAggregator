@@ -5,7 +5,6 @@ public enum ErrorCode
 {
     Success = 0,
     InvalidRequest = 1000,
-    InvalidDateRange = 1001,
     Unauthorized = 1002,
     InvalidCredentials = 1003,
     TeamNotFound = 2000,
@@ -25,7 +24,7 @@ public static class ErrorCodeExtensions
     public static int ToStatusCode(this ErrorCode code) => code switch
     {
         ErrorCode.Success => StatusCodes.Status200OK,
-        ErrorCode.InvalidRequest or ErrorCode.InvalidDateRange => StatusCodes.Status400BadRequest,
+        ErrorCode.InvalidRequest => StatusCodes.Status400BadRequest,
         ErrorCode.Unauthorized or ErrorCode.InvalidCredentials => StatusCodes.Status401Unauthorized,
         ErrorCode.TeamNotFound or ErrorCode.MatchNotFound or ErrorCode.PlayerNotFound => StatusCodes.Status404NotFound,
         ErrorCode.ProviderRateLimited => StatusCodes.Status503ServiceUnavailable,

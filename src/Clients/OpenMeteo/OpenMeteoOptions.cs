@@ -1,4 +1,4 @@
-namespace UclAggregator.Options;
+namespace UclAggregator.Clients.OpenMeteo;
 
 public sealed class OpenMeteoOptions
 {

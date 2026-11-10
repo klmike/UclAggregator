@@ -6,5 +6,4 @@ public sealed record ApiCallSample(
     string CallName,
     DateTimeOffset Timestamp,
     double ResponseTimeMs,
-    ErrorCode ErrorCode,
-    bool Matched);
+    ErrorCode ErrorCode) : ISample;

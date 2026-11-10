@@ -175,3 +175,22 @@ public sealed class EspnNewsDto
 
     public sealed class LinkDto { public string? Href { get; init; } }
 }
+
+public sealed class EspnTeamsDto
+{
+    public List<SportDto>? Sports { get; init; }
+
+    public sealed class SportDto { public List<LeagueDto>? Leagues { get; init; } }
+    public sealed class LeagueDto { public List<TeamEntryDto>? Teams { get; init; } }
+    public sealed class TeamEntryDto { public TeamDto? Team { get; init; } }
+
+    public sealed class TeamDto
+    {
+        public string? Id { get; init; }
+        public string? DisplayName { get; init; }
+        public string? ShortDisplayName { get; init; }
+        public string? Name { get; init; }
+        public string? Location { get; init; }
+        public string? Abbreviation { get; init; }
+    }
+}

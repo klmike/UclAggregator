@@ -11,6 +11,7 @@ public sealed class MetricsJob(
     StatsHistory<ApiStats> apiHistory,
     ILogger<MetricsJob> logger) : BackgroundService
 {
+    // 1.5 = a value more than 50% above its historical baseline is logged as an anomaly
     private const double Threshold = 1.5;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -36,8 +37,9 @@ public sealed class MetricsJob(
         var now = DateTimeOffset.UtcNow;
         foreach (var group in clientSamples.Drain().GroupBy(s => s.ClientName))
         {
-            var stats = ClientStatsFor(group.Key, now, group.ToList());
-            CheckClientAnomalies(stats, clientHistory.Get(group.Key));
+            var stats = ClientStats.From(group.Key, now, group.ToList());
+            Check(stats.ClientName, stats.AverageResponseTime, stats.ApiCalls, stats.Errors,
+                clientHistory.Get(group.Key).Select(p => (p.AverageResponseTime, p.ApiCalls, p.Errors)));
             clientHistory.Add(stats.ClientName, stats);
         }
     }
@@ -47,74 +49,33 @@ public sealed class MetricsJob(
         var now = DateTimeOffset.UtcNow;
         foreach (var group in apiSamples.Drain().GroupBy(s => s.CallName))
         {
-            var stats = ApiStatsFor(group.Key, now, group.ToList());
-            CheckApiAnomalies(stats, apiHistory.Get(group.Key));
+            var stats = ApiStats.From(group.Key, now, group.ToList());
+            Check(stats.CallName, stats.AverageResponseTime, stats.Calls, stats.Errors,
+                apiHistory.Get(group.Key).Select(p => (p.AverageResponseTime, p.Calls, p.Errors)));
             apiHistory.Add(stats.CallName, stats);
         }
     }
 
-    private static ClientStats ClientStatsFor(string clientName, DateTimeOffset timestamp, IReadOnlyList<ClientCallSample> samples)
+    private void Check(
+        string name,
+        double currentAverage,
+        int currentCalls,
+        int currentErrors,
+        IEnumerable<(double Average, int Calls, int Errors)> past)
     {
-        var apiCalls = samples.Where(s => s.ApiCall).ToList();
-        var errors = apiCalls.Count(s => s.ClientError || s.TimedOut);
-        return new ClientStats(
-            clientName,
-            timestamp,
-            AverageResponseTime: apiCalls.Count == 0 ? 0 : apiCalls.Average(s => s.ResponseTimeMs),
-            ApiCalls: apiCalls.Count,
-            CacheCalls: samples.Count(s => s.CacheUsed),
-            TimedOut: samples.Count(s => s.TimedOut),
-            Errors: errors,
-            ErrorRate: apiCalls.Count == 0 ? 0 : (double)errors / apiCalls.Count);
-    }
-
-    private static ApiStats ApiStatsFor(string callName, DateTimeOffset timestamp, IReadOnlyList<ApiCallSample> samples)
-    {
-        var errors = samples.Count(s => s.ErrorCode != ErrorCode.Success);
-        return new ApiStats(
-            callName,
-            timestamp,
-            AverageResponseTime: samples.Average(s => s.ResponseTimeMs),
-            Calls: samples.Count,
-            Errors: errors,
-            ErrorRate: (double)errors / samples.Count,
-            ErrorCodes: samples
-                .Where(s => s.ErrorCode != ErrorCode.Success)
-                .GroupBy(s => s.ErrorCode)
-                .ToDictionary(g => g.Key, g => g.Count()));
-    }
-
-    private void CheckClientAnomalies(ClientStats current, IReadOnlyList<ClientStats> past)
-    {
-        var pastCalls = past.Sum(p => p.ApiCalls);
-        if (current.ApiCalls == 0 || pastCalls == 0)
+        var previous = past.ToList();
+        var pastCalls = previous.Sum(p => p.Calls);
+        if (currentCalls == 0 || pastCalls == 0)
             return;
 
-        var baselineTime = past.Sum(p => p.AverageResponseTime * p.ApiCalls) / pastCalls;
-        var baselineErrorRate = (double)past.Sum(p => p.Errors) / pastCalls;
+        var baselineTime = previous.Sum(p => p.Average * p.Calls) / pastCalls;
+        var baselineErrorRate = (double)previous.Sum(p => p.Errors) / pastCalls;
 
-        if (current.AverageResponseTime > baselineTime * Threshold)
-            logger.LogWarning("{Client} average response time {Current:F0} ms is over 50% above the usual {Baseline:F0} ms",
-                current.ClientName, current.AverageResponseTime, baselineTime);
-        if (current.ErrorRate > baselineErrorRate * Threshold)
-            logger.LogWarning("{Client} error rate {Current:P1} is over 50% above the usual {Baseline:P1}",
-                current.ClientName, current.ErrorRate, baselineErrorRate);
-    }
-
-    private void CheckApiAnomalies(ApiStats current, IReadOnlyList<ApiStats> past)
-    {
-        var pastCalls = past.Sum(p => p.Calls);
-        if (pastCalls == 0)
-            return;
-
-        var baselineTime = past.Sum(p => p.AverageResponseTime * p.Calls) / pastCalls;
-        var baselineErrorRate = (double)past.Sum(p => p.Errors) / pastCalls;
-
-        if (current.AverageResponseTime > baselineTime * Threshold)
-            logger.LogWarning("{Call} average response time {Current:F0} ms is over 50% above the usual {Baseline:F0} ms",
-                current.CallName, current.AverageResponseTime, baselineTime);
-        if (current.ErrorRate > baselineErrorRate * Threshold)
-            logger.LogWarning("{Call} error rate {Current:P1} is over 50% above the usual {Baseline:P1}",
-                current.CallName, current.ErrorRate, baselineErrorRate);
+        if (currentAverage > baselineTime * Threshold)
+            logger.LogWarning("{Name} average response time {Current:F0} ms is over 50% above the usual {Baseline:F0} ms",
+                name, currentAverage, baselineTime);
+        if ((double)currentErrors / currentCalls > baselineErrorRate * Threshold)
+            logger.LogWarning("{Name} error rate {Current:P1} is over 50% above the usual {Baseline:P1}",
+                name, (double)currentErrors / currentCalls, baselineErrorRate);
     }
 }

@@ -89,6 +89,11 @@ internal static class EspnJson
         if (TestHttp.Has(request, "summary")) return TestHttp.Json(Summary);
         if (TestHttp.Has(request, "scoreboard") || TestHttp.Has(request, "schedule")) return TestHttp.Json(Scoreboard);
         if (TestHttp.Has(request, "news")) return TestHttp.Json("""{ "articles": [] }""");
+        if (request.RequestUri!.AbsolutePath.EndsWith("/teams", StringComparison.Ordinal)) return TestHttp.Json(Teams);
         return TestHttp.Fail();
     }
+
+    public const string Teams = """
+        { "sports": [{ "leagues": [{ "teams": [{ "team": { "id": "359", "displayName": "Arsenal" } }] }] }] }
+        """;
 }

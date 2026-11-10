@@ -1,4 +1,4 @@
-namespace UclAggregator.Options;
+namespace UclAggregator.Clients.Guardian;
 
 public sealed class GuardianOptions
 {

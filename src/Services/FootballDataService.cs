@@ -13,6 +13,23 @@ public sealed class FootballDataService(
 {
     public async Task<TeamRef?> ResolveTeamAsync(string name, CancellationToken ct)
     {
+        try
+        {
+            if (await ResolveTeamFromEspnAsync(name, ct) is { } team)
+            {
+                return team;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "ESPN lookup failed for {Name}; falling back to TheSportsDB", name);
+            return await ResolveTeamFromSportsDbAsync(name, ct) ?? throw new HttpRequestException("ESPN team lookup failed", ex);
+        }
+        return await ResolveTeamFromSportsDbAsync(name, ct);
+    }
+
+    private async Task<TeamRef?> ResolveTeamFromSportsDbAsync(string name, CancellationToken ct)
+    {
         var t = (await sportsDb.SearchTeamAsync(name, ct))?.Teams?.FirstOrDefault();
         if (t is null)
         {
@@ -24,6 +41,18 @@ public sealed class FootballDataService(
             logger.LogWarning("Team {Team} has no ESPN id; matches, standing and players will be empty", t.Name ?? name);
         }
         return new TeamRef(t.Name ?? name, t.EspnId);
+    }
+
+    private async Task<TeamRef?> ResolveTeamFromEspnAsync(string name, CancellationToken ct)
+    {
+        var teams = (await espn.GetTeamsAsync(ct))?.Sports?.FirstOrDefault()?.Leagues?.FirstOrDefault()?.Teams?
+            .Select(e => e.Team).OfType<EspnTeamsDto.TeamDto>().Where(t => t.Id is not null).ToList() ?? [];
+        var match = teams.FirstOrDefault(t => Names(t).Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            ?? teams.FirstOrDefault(t => Names(t).Any(n => n.Contains(name, StringComparison.OrdinalIgnoreCase)));
+        return match is null ? null : new TeamRef(match.DisplayName ?? name, match.Id);
+
+        static IEnumerable<string> Names(EspnTeamsDto.TeamDto t) =>
+            new[] { t.DisplayName, t.ShortDisplayName, t.Name, t.Location }.OfType<string>();
     }
 
     internal async Task<MatchDetail?> GetMatchDetailAsync(string id, CancellationToken ct) =>

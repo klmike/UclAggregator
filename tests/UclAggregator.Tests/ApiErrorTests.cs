@@ -29,7 +29,6 @@ public class ApiErrorTests
 
     [Theory]
     [InlineData(ErrorCode.InvalidRequest, 400)]
-    [InlineData(ErrorCode.InvalidDateRange, 400)]
     [InlineData(ErrorCode.Unauthorized, 401)]
     [InlineData(ErrorCode.TeamNotFound, 404)]
     [InlineData(ErrorCode.ProviderUnavailable, 502)]

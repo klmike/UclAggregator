@@ -1,15 +1,13 @@
 namespace UclAggregator.Metrics.Clients;
 
-/// <summary>Client metrics grouped by historical average response time. Latest is returned but not used for the bucket.</summary>
-public sealed record ClientMetricsResponse(
-    MetricWindows<ClientStats> Fast,
-    MetricWindows<ClientStats> Average,
-    MetricWindows<ClientStats> Slow)
+public static class ClientMetricsResponse
 {
-    public static ClientMetricsResponse From(StatsHistory<ClientStats> store)
+    public static MetricsResponse<ClientStats> From(StatsHistory<ClientStats> store, SampleBuffer<ClientCallSample> samples)
     {
-        var grouped = PerformanceBuckets.Group(
-            store.GetLatest(), store.GetAll(), s => s.AverageResponseTime, s => s.ApiCalls);
-        return new(grouped.Fast, grouped.Average, grouped.Slow);
+        var now = DateTimeOffset.UtcNow;
+        var latest = samples.Recent()
+            .GroupBy(s => s.ClientName)
+            .ToDictionary(g => g.Key, g => ClientStats.From(g.Key, now, g.ToList()));
+        return PerformanceBuckets.Group(latest, store.GetAll(), s => s.AverageResponseTime, s => s.ApiCalls);
     }
 }

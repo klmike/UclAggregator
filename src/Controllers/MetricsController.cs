@@ -7,11 +7,15 @@ namespace UclAggregator.Controllers;
 
 [ApiController]
 [Route("metrics")]
-public class MetricsController(StatsHistory<ClientStats> clientStats, StatsHistory<ApiStats> apiStats) : ControllerBase
+public class MetricsController(
+    StatsHistory<ClientStats> clientStats,
+    SampleBuffer<ClientCallSample> clientSamples,
+    StatsHistory<ApiStats> apiStats,
+    SampleBuffer<ApiCallSample> apiSamples) : ControllerBase
 {
     [HttpGet("clients")]
-    public ClientMetricsResponse Clients() => ClientMetricsResponse.From(clientStats);
+    public MetricsResponse<ClientStats> Clients() => ClientMetricsResponse.From(clientStats, clientSamples);
 
     [HttpGet("api")]
-    public ApiMetricsResponse Api() => ApiMetricsResponse.From(apiStats);
+    public MetricsResponse<ApiStats> Api() => ApiMetricsResponse.From(apiStats, apiSamples);
 }

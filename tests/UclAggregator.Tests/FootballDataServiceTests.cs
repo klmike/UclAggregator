@@ -9,8 +9,18 @@ public class FootballDataServiceTests
     [Fact]
     public async Task Resolve_returns_null_when_team_missing()
     {
-        var football = TestServices.Football(_ => TestHttp.Fail(), _ => TestHttp.Json("""{"teams":null}"""));
+        var football = TestServices.Football(EspnJson.Route, _ => TestHttp.Json("""{"teams":null}"""));
         Assert.Null(await football.ResolveTeamAsync("Nope", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Resolve_prefers_espn_and_falls_back_to_sportsdb()
+    {
+        var viaEspn = TestServices.Football(EspnJson.Route, _ => TestHttp.Fail());
+        Assert.Equal("359", (await viaEspn.ResolveTeamAsync("Arsenal", CancellationToken.None))!.EspnId);
+
+        var viaSportsDb = TestServices.Football(_ => TestHttp.Fail());
+        Assert.Equal("359", (await viaSportsDb.ResolveTeamAsync("Arsenal", CancellationToken.None))!.EspnId);
     }
 
     [Fact]

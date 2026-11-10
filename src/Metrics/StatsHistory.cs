@@ -4,14 +4,14 @@ namespace UclAggregator.Metrics;
 
 public sealed class StatsHistory<T>
 {
+    // 7 days of 5 minute snapshots
     private const int MaxEntries = 2016;
 
     private readonly ConcurrentDictionary<string, List<T>> history = new();
-    private readonly ConcurrentDictionary<string, T> latest = new();
 
     public void Add(string key, T stats)
     {
-        latest[key] = stats;
+        // the dictionary is thread safe but the lists are not, so every list access takes its own lock
         var list = history.GetOrAdd(key, _ => []);
         lock (list)
         {
@@ -30,8 +30,6 @@ public sealed class StatsHistory<T>
             return [.. list];
         }
     }
-
-    public IReadOnlyDictionary<string, T> GetLatest() => latest.ToDictionary();
 
     public IReadOnlyDictionary<string, IReadOnlyList<T>> GetAll() =>
         history.Keys.ToDictionary(name => name, Get);

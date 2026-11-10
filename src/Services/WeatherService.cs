@@ -54,7 +54,7 @@ public sealed class WeatherService(
                 WeatherCode = weatherCode,
             };
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "Weather provider failed");
             return Skip(response, "the weather provider failed");

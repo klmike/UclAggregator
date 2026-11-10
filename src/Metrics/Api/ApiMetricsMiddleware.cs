@@ -20,7 +20,7 @@ public sealed class ApiMetricsMiddleware(RequestDelegate next, SampleBuffer<ApiC
         }
         catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested)
         {
-            failure = ApiError.From(ex, "The request").Code; // the exception handler runs after us and cannot tell us
+            failure = ApiError.From(ex, "The request").Code;
             throw;
         }
         finally
@@ -29,15 +29,13 @@ public sealed class ApiMetricsMiddleware(RequestDelegate next, SampleBuffer<ApiC
             var matched = endpoint is not null;
             var isController = endpoint?.Metadata.GetMetadata<ControllerActionDescriptor>() is not null;
 
-            // Skip aborted requests and non-controller endpoints (OpenAPI, Scalar); unmatched routes are always recorded.
             if (!context.RequestAborted.IsCancellationRequested && (!matched || isController))
             {
                 store.Record(new ApiCallSample(
                     CallName: (endpoint as RouteEndpoint)?.RoutePattern.RawText ?? "unmatched",
                     startedAt,
                     stopwatch.Elapsed.TotalMilliseconds,
-                    failure ?? GetErrorCode(context),
-                    matched));
+                    failure ?? GetErrorCode(context)));
             }
         }
     }

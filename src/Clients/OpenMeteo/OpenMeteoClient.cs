@@ -25,7 +25,6 @@ public sealed class OpenMeteoClient(HttpClient http, IOptions<OpenMeteoOptions> 
         return Check(body, body?.Error, body?.Reason);
     }
 
-    // Open-Meteo reports some failures inside a 200 response.
     private static T? Check<T>(T? body, bool? error, string? reason) where T : class =>
         error == true ? throw new AppException(ErrorCode.ProviderBadResponse, $"Open-Meteo reported an error: {reason}") : body;
 }

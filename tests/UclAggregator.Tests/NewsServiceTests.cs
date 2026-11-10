@@ -90,7 +90,7 @@ public class NewsServiceTests
     }
 
     [Fact]
-    public async Task Search_skips_fallback_when_primary_has_enough_articles()
+    public async Task Search_ignores_prefetched_fallback_when_primary_has_enough_articles()
     {
         var guardian = Source("guardian", Article("u1", "One"), Article("u2", "Two"));
         var google = new FakeNewsSource { Name = "google", Fallback = true, Articles = [Article("g1", "Fallback")] };
@@ -98,7 +98,7 @@ public class NewsServiceTests
         var found = await TestServices.News(guardian, google)
             .SearchAsync("ucl", null, null, null, new ApiResponse(), CancellationToken.None);
 
-        Assert.Empty(google.Queries);
+        Assert.Single(google.Queries);
         Assert.Equal(["u1", "u2"], found.Select(a => a.Id));
     }
 

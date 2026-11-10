@@ -34,9 +34,9 @@ public sealed class ReportService(
         }
 
         var year = season ?? CurrentSeason();
-        var matches = TryAsync(response, "Matches", () => football.GetTeamMatchesAsync(team, year, ct));
-        var standing = TryAsync(response, "Standing", () => football.GetStandingAsync(team, year, ct));
-        var players = TryAsync(response, "Players", () => football.GetTopPlayersAsync(team, year, _opt.TopPlayersWithNews, ct));
+        var matches = TryAsync(response, "Matches", () => football.GetTeamMatchesAsync(team, year, ct), ct);
+        var standing = TryAsync(response, "Standing", () => football.GetStandingAsync(team, year, ct), ct);
+        var players = TryAsync(response, "Players", () => football.GetTopPlayersAsync(team, year, _opt.TopPlayersWithNews, ct), ct);
         var teamNews = news.SearchAsync(team.Name, null, null, team.Name, response, ct);
         await Task.WhenAll(matches, standing, players, teamNews);
 
@@ -78,7 +78,7 @@ public sealed class ReportService(
 
         MatchDetail? detail = null;
         if (date is not null && match.Id is { } id)
-            detail = await TryAsync(response, "Match stats", () => football.GetMatchDetailAsync(id, ct));
+            detail = await TryAsync(response, "Match stats", () => football.GetMatchDetailAsync(id, ct), ct);
         await BuildMatchAsync(response, detail?.Match ?? match, detail?.Stats, limit, ct);
         return response;
     }
@@ -115,6 +115,7 @@ public sealed class ReportService(
         var terms = $"{_opt.DefaultKeywords} {match.Title}";
         var day = match.Date is { } t ? DateOnly.FromDateTime(t.UtcDateTime) : (DateOnly?)null;
 
+        // only news from a couple of days around the match
         var weatherTask = weather.GetForMatchAsync(match, response, ct);
         var newsTask = news.SearchAsync(terms, day?.AddDays(-2), day?.AddDays(2), null, response, ct);
         await Task.WhenAll(weatherTask, newsTask);
@@ -125,13 +126,14 @@ public sealed class ReportService(
         response.News = NewsService.Combine(newsTask.Result, limit ?? _opt.DefaultNewsLimit);
     }
 
-    private async Task<T?> TryAsync<T>(ApiResponse response, string what, Func<Task<T>> call)
+    private async Task<T?> TryAsync<T>(ApiResponse response, string what, Func<Task<T>> call, CancellationToken ct)
     {
         try
         {
             return await call();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // HttpClient reports its own timeout as TaskCanceledException. Only a cancelled request should abort.
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             var error = ApiError.From(ex, what);
             logger.LogWarning(ex, "{What} failed with {Code}", what, error.Code);
@@ -141,6 +143,7 @@ public sealed class ReportService(
     }
     private static int CurrentSeason()
     {
+        // season starts in July, so Jan-Jun still belongs to the previous year's season
         var now = DateTime.UtcNow;
         return now.Month >= 7 ? now.Year : now.Year - 1;
     }

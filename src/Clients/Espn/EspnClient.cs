@@ -10,6 +10,9 @@ public sealed class EspnClient(HttpClient http, IOptions<EspnOptions> options)
     public Task<EspnScoreboardDto?> GetScoreboardAsync(DateOnly date, CancellationToken ct) =>
         Get<EspnScoreboardDto>($"scoreboard?dates={date:yyyyMMdd}", ct);
 
+    public Task<EspnTeamsDto?> GetTeamsAsync(CancellationToken ct) =>
+        Get<EspnTeamsDto>("teams", ct);
+
     public Task<EspnSummaryDto?> GetSummaryAsync(string matchId, CancellationToken ct) =>
         Get<EspnSummaryDto>($"summary?event={Uri.EscapeDataString(matchId)}", ct);
 

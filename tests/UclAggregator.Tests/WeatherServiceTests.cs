@@ -90,6 +90,27 @@ public class WeatherServiceTests
     }
 
     [Fact]
+    public async Task Skip_when_provider_times_out()
+    {
+        var weather = TestServices.Weather(TestHttp.Throwing(new TaskCanceledException("timeout", new TimeoutException())));
+        var response = new ApiResponse();
+
+        Assert.Null(await weather.GetForMatchAsync(Match(Kickoff, "London"), response, CancellationToken.None));
+        Assert.Contains("weather provider failed", Assert.Single(response.Warnings).Message);
+    }
+
+    [Fact]
+    public async Task Caller_cancel_is_not_swallowed()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var weather = TestServices.Weather(TestHttp.Throwing(new TaskCanceledException("aborted")));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            weather.GetForMatchAsync(Match(Kickoff, "London"), new ApiResponse(), cts.Token));
+    }
+
+    [Fact]
     public async Task Skip_when_provider_throws()
     {
         var weather = TestServices.Weather(TestHttp.Throwing(new HttpRequestException("down")));

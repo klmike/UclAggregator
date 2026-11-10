@@ -105,6 +105,25 @@ public class ReportServiceTests
     }
 
     [Fact]
+    public async Task Team_keeps_payload_when_standing_times_out()
+    {
+        var reports = Reports(espn: request =>
+        {
+            if (TestHttp.Has(request, "standings"))
+                throw new TaskCanceledException("timeout", new TimeoutException());
+            return EspnJson.Route(request);
+        });
+
+        var result = await reports.GetTeamAsync("Arsenal", 2024, 5, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal("Arsenal", result.Team);
+        Assert.Null(result.Standing);
+        Assert.NotEmpty(result.Matches);
+        Assert.Equal(ErrorCode.ProviderTimeout, Assert.Single(result.Warnings).Code);
+    }
+
+    [Fact]
     public async Task Team_survives_when_espn_and_news_fail()
     {
         var news = new FakeNewsSource { Name = "guardian", Fail = new HttpRequestException("down") };

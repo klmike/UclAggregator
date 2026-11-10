@@ -1,4 +1,4 @@
-namespace UclAggregator.Options;
+namespace UclAggregator.Clients.GoogleNews;
 
 public sealed class GoogleNewsOptions
 {

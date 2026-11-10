@@ -7,57 +7,44 @@ using UclAggregator.Options;
 
 namespace UclAggregator.Clients;
 
-public sealed class CachingHandler(IMemoryCache cache, IOptions<AggregatorOptions> options)
-    : DelegatingHandler
+// Successful GETs are reused for CacheHours. Anything else is returned as-is so the next call can try again.
+public sealed class CachingHandler(IMemoryCache cache, IOptions<AggregatorOptions> options) : DelegatingHandler
 {
     private sealed record Entry(HttpStatusCode Status, byte[] Body, MediaTypeHeaderValue? ContentType);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         if (request.Method != HttpMethod.Get || request.RequestUri is null)
-        {
             return await base.SendAsync(request, ct);
-        }
 
         var key = request.RequestUri.AbsoluteUri;
-        var ttl = TimeSpan.FromHours(options.Value.CacheHours);
-        var hit = true;
-        var lazy = cache.GetOrCreate(key, e =>
+        if (cache.TryGetValue(key, out Entry? cached) && cached is not null)
         {
-            hit = false;
-            e.AbsoluteExpirationRelativeToNow = ttl;
-            // Shared fetch must not cancel with the first caller; each waiter uses its own token.
-            return new Lazy<Task<Entry>>(() => FetchAsync(request, key));
-        })!;
-
-        if (request.Options.TryGetValue(RequestMetrics.Key, out var metrics))
-        {
-            metrics.CacheUsed = hit;
+            if (request.Options.TryGetValue(RequestMetrics.Key, out var metrics))
+                metrics.CacheUsed = true;
+            return Copy(request, cached);
         }
 
-        var entry = await lazy.Value.WaitAsync(ct);
+        var response = await base.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+            return response;
 
-        var response = new HttpResponseMessage(entry.Status) { RequestMessage = request, Content = new ByteArrayContent(entry.Body) };
-        response.Content.Headers.ContentType = entry.ContentType;
+        var body = await response.Content.ReadAsByteArrayAsync(ct);
+        var contentType = response.Content.Headers.ContentType;
+        cache.Set(key, new Entry(response.StatusCode, body, contentType), TimeSpan.FromHours(options.Value.CacheHours));
+        response.Content = new ByteArrayContent(body);
+        response.Content.Headers.ContentType = contentType;
         return response;
     }
 
-    private async Task<Entry> FetchAsync(HttpRequestMessage request, string key)
+    private static HttpResponseMessage Copy(HttpRequestMessage request, Entry entry)
     {
-        try
+        var response = new HttpResponseMessage(entry.Status)
         {
-            using var response = await base.SendAsync(request, CancellationToken.None);
-            var body = await response.Content.ReadAsByteArrayAsync(CancellationToken.None);
-            if (!response.IsSuccessStatusCode)
-            {
-                cache.Remove(key);
-            }
-            return new Entry(response.StatusCode, body, response.Content.Headers.ContentType);
-        }
-        catch
-        {
-            cache.Remove(key);
-            throw;
-        }
+            RequestMessage = request,
+            Content = new ByteArrayContent(entry.Body),
+        };
+        response.Content.Headers.ContentType = entry.ContentType;
+        return response;
     }
 }
